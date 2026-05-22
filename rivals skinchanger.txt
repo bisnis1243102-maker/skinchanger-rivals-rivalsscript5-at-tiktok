@@ -1,10 +1,11 @@
--- [[ CUSTOM MODERN SCRIPT HUB ENGINE ]] --
+-- [[ CUSTOM MODERN SCRIPT HUB ENGINE V3 ]] --
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
 local CoreGui = game:GetService("CoreGui")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
+local Lighting = game:GetService("Lighting")
 
 local player = Players.LocalPlayer
 local playerScripts = player.PlayerScripts
@@ -18,7 +19,7 @@ local CosmeticLibrary = require(ReplicatedStorage.Modules:WaitForChild("Cosmetic
 local ItemLibrary = require(ReplicatedStorage.Modules:WaitForChild("ItemLibrary", 10))
 local DataController = require(controllers:WaitForChild("PlayerDataController", 10))
 
--- Global System States (Controlled via GUI Toggles)
+-- Global System States
 local Toggles = {
     SkinChanger = true,
     CharmChanger = true,
@@ -29,7 +30,6 @@ local Toggles = {
 
 local equipped, favorites = {}, {}
 local constructingWeapon, viewingProfile = nil, nil
-local lastUsedWeapon = nil
 local saveFile = "unlockall/custom_config.json"
 
 -- ==================== BACKEND OPTIMIZED UNLOCK ENGINE ====================
@@ -92,11 +92,15 @@ end
 
 local function isAllowedCosmetic(name, cosmeticType)
     if name:find("MISSING_") then return false end
+    local typeLower = cosmeticType and cosmeticType:lower() or ""
+    local nameLower = name:lower()
     
-    if cosmeticType == "Skin" and Toggles.SkinChanger then return true end
-    if (cosmeticType == "Charm" or name:lower():find("charm")) and Toggles.CharmChanger then return true end
-    if (cosmeticType == "Wrap" or cosmeticType == "Wrapping" or name:lower():find("wrap")) and Toggles.WrapChanger then return true end
-    if (cosmeticType == "Dance" or cosmeticType == "Emote" or name:lower():find("dance") or name:lower():find("emote")) and Toggles.DanceChanger then return true end
+    if typeLower == "skin" and Toggles.SkinChanger then return true end
+    if (typeLower == "charm" or nameLower:find("charm")) and Toggles.CharmChanger then return true end
+    if (typeLower == "wrap" or typeLower == "wrapping" or nameLower:find("wrap")) and Toggles.WrapChanger then return true end
+    
+    -- Added "Taunt" and "Animation" fallbacks for emotes
+    if (typeLower == "dance" or typeLower == "emote" or typeLower == "taunt" or nameLower:find("dance") or nameLower:find("emote") or nameLower:find("taunt")) and Toggles.DanceChanger then return true end
     
     return false
 end
@@ -113,18 +117,24 @@ end
 local originalGet = DataController.Get
 DataController.Get = function(self, key)
     local data = originalGet(self, key)
+    
+    -- THE EMOTE FIX: Forcefully inject items into the table so `pairs()` loops can see them
     if key == "CosmeticInventory" then
-        local proxy = {}
-        if data then for k, v in pairs(data) do 
-            local cosmetic = CosmeticLibrary.Cosmetics[k]
-            if cosmetic and isAllowedCosmetic(k, cosmetic.Type) then proxy[k] = v end
-        end end
+        local proxy = type(data) == "table" and table.clone(data) or {}
+        
+        for k, cosmetic in pairs(CosmeticLibrary.Cosmetics) do
+            if isAllowedCosmetic(k, cosmetic.Type) then
+                proxy[k] = true -- Actually inserts it so UI loops render it
+            end
+        end
+        
         return setmetatable(proxy, {__index = function(t, k)
             local cosmetic = CosmeticLibrary.Cosmetics[k]
             if cosmetic and isAllowedCosmetic(k, cosmetic.Type) then return true end
-            return nil
+            return type(data) == "table" and data[k] or nil
         end})
     end
+    
     if key == "FavoritedCosmetics" then
         local result = data and table.clone(data) or {}
         for weapon, favs in pairs(favorites) do
@@ -156,7 +166,7 @@ DataController.GetWeaponData = function(self, weaponName)
     return merged
 end
 
--- Client Interaction Layer
+-- Client Interaction Layer (Wraps & Charms fix)
 local ClientItem
 pcall(function() ClientItem = require(player.PlayerScripts.Modules.ClientReplicatedClasses.ClientFighter.ClientItem) end)
 if ClientItem and ClientItem._CreateViewModel then
@@ -165,11 +175,33 @@ if ClientItem and ClientItem._CreateViewModel then
         local weaponName = self.Name
         local weaponPlayer = self.ClientFighter and self.ClientFighter.Player
         constructingWeapon = (weaponPlayer == player) and weaponName or nil
+        
         if weaponPlayer == player and equipped[weaponName] and viewmodelRef then
-            if equipped[weaponName].Skin and Toggles.SkinChanger then
-                local dataKey, skinKey, nameKey = self:ToEnum("Data"), self:ToEnum("Skin"), self:ToEnum("Name")
-                if viewmodelRef[dataKey] then viewmodelRef[dataKey][skinKey] = equipped[weaponName].Skin viewmodelRef[dataKey][nameKey] = equipped[weaponName].Skin.Name
-                elseif viewmodelRef.Data then viewmodelRef.Data.Skin = equipped[weaponName].Skin viewmodelRef.Data.Name = equipped[weaponName].Skin.Name end
+            local dataKey = self:ToEnum("Data")
+            local nameKey = self:ToEnum("Name")
+            
+            local targetData = viewmodelRef[dataKey] or viewmodelRef.Data
+            if targetData then
+                if equipped[weaponName].Skin and Toggles.SkinChanger then
+                    local skinKey = self:ToEnum("Skin")
+                    if viewmodelRef[dataKey] then 
+                        viewmodelRef[dataKey][skinKey] = equipped[weaponName].Skin 
+                        viewmodelRef[dataKey][nameKey] = equipped[weaponName].Skin.Name
+                    else 
+                        viewmodelRef.Data.Skin = equipped[weaponName].Skin 
+                        viewmodelRef.Data.Name = equipped[weaponName].Skin.Name 
+                    end
+                end
+                if equipped[weaponName].Wrap and Toggles.WrapChanger then
+                    local wrapKey = self:ToEnum("Wrap")
+                    if viewmodelRef[dataKey] then viewmodelRef[dataKey][wrapKey] = equipped[weaponName].Wrap 
+                    else viewmodelRef.Data.Wrap = equipped[weaponName].Wrap end
+                end
+                if equipped[weaponName].Charm and Toggles.CharmChanger then
+                    local charmKey = self:ToEnum("Charm")
+                    if viewmodelRef[dataKey] then viewmodelRef[dataKey][charmKey] = equipped[weaponName].Charm 
+                    else viewmodelRef.Data.Charm = equipped[weaponName].Charm end
+                end
             end
         end
         local result = originalCreateViewModel(self, viewmodelRef)
@@ -183,7 +215,6 @@ if hookmetamethod then
     local remotes = ReplicatedStorage:FindFirstChild("Remotes")
     local dataRemotes = remotes and remotes:FindFirstChild("Data")
     local equipRemote = dataRemotes and dataRemotes:FindFirstChild("EquipCosmetic")
-    local favoriteRemote = dataRemotes and dataRemotes:FindFirstChild("FavoriteCosmetic")
     
     local oldNamecall
     oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
@@ -192,7 +223,8 @@ if hookmetamethod then
         
         if self == equipRemote then
             local weaponName, cosmeticType, cosmeticName, options = args[1], args[2], args[3], args[4] or {}
-            local isDanceRemote = (cosmeticType == "Dance" or cosmeticType == "Emote" or (cosmeticName and (cosmeticName:lower():find("dance") or cosmeticName:lower():find("emote"))))
+            local tLower = cosmeticType and cosmeticType:lower() or ""
+            local isDanceRemote = (tLower == "dance" or tLower == "emote" or tLower == "taunt" or (cosmeticName and (cosmeticName:lower():find("dance") or cosmeticName:lower():find("emote"))))
             
             if isDanceRemote then
                 equipped.Dances = equipped.Dances or {}
@@ -224,10 +256,10 @@ loadConfig()
 
 -- ==================== ADVANCED UI CREATION SYSTEM ====================
 
-local UI_Accent = Color3.fromRGB(0, 168, 255)       -- Sleek Neon Light Blue Accent
-local UI_Background = Color3.fromRGB(16, 16, 20)    -- Deep Dark Slate
-local UI_Sidebar = Color3.fromRGB(22, 22, 28)       -- Secondary Gray for Sidebar
-local UI_Card = Color3.fromRGB(26, 26, 32)          -- Component Card Gray
+local UI_Accent = Color3.fromRGB(0, 168, 255)       
+local UI_Background = Color3.fromRGB(16, 16, 20)    
+local UI_Sidebar = Color3.fromRGB(22, 22, 28)       
+local UI_Card = Color3.fromRGB(26, 26, 32)          
 
 local HubGui = Instance.new("ScreenGui")
 HubGui.Name = "PremiumScriptHub"
@@ -237,9 +269,7 @@ HubGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 local success, coreTarget = pcall(function() return CoreGui end)
 HubGui.Parent = success and coreTarget or player:WaitForChild("PlayerGui")
 
--- Main Window Window
 local MainWindow = Instance.new("Frame")
-MainWindow.Name = "MainWindow"
 MainWindow.Size = UDim2.new(0, 560, 0, 360)
 MainWindow.Position = UDim2.new(0.5, -280, 0.5, -180)
 MainWindow.BackgroundColor3 = UI_Background
@@ -247,14 +277,8 @@ MainWindow.BorderSizePixel = 0
 MainWindow.Active = true
 MainWindow.Parent = HubGui
 
-local MainCorner = Instance.new("UICorner")
-MainCorner.CornerRadius = UDim.new(0, 10)
-MainCorner.Parent = MainWindow
-
-local MainStroke = Instance.new("UIStroke")
-MainStroke.Color = Color3.fromRGB(38, 38, 45)
-MainStroke.Thickness = 1
-MainStroke.Parent = MainWindow
+local MainCorner = Instance.new("UICorner") MainCorner.CornerRadius = UDim.new(0, 10) MainCorner.Parent = MainWindow
+local MainStroke = Instance.new("UIStroke") MainStroke.Color = Color3.fromRGB(38, 38, 45) MainStroke.Parent = MainWindow
 
 -- Custom Drag Drop Handling
 local dragging, dragInput, dragStart, startPos
@@ -274,25 +298,14 @@ UserInputService.InputChanged:Connect(function(input)
     end
 end)
 
--- LEFT SIDE NAVIGATION BAR
+-- Sidebar
 local Sidebar = Instance.new("Frame")
-Sidebar.Name = "Sidebar"
 Sidebar.Size = UDim2.new(0, 150, 1, 0)
 Sidebar.BackgroundColor3 = UI_Sidebar
 Sidebar.BorderSizePixel = 0
 Sidebar.Parent = MainWindow
-
-local SidebarCorner = Instance.new("UICorner")
-SidebarCorner.CornerRadius = UDim.new(0, 10)
-SidebarCorner.Parent = Sidebar
-
--- Clean hide-overflow edge block
-local SidebarBlock = Instance.new("Frame")
-SidebarBlock.Size = UDim2.new(0, 10, 1, 0)
-SidebarBlock.Position = UDim2.new(1, -10, 0, 0)
-SidebarBlock.BackgroundColor3 = UI_Sidebar
-SidebarBlock.BorderSizePixel = 0
-SidebarBlock.Parent = Sidebar
+local SidebarCorner = Instance.new("UICorner") SidebarCorner.CornerRadius = UDim.new(0, 10) SidebarCorner.Parent = Sidebar
+local SidebarBlock = Instance.new("Frame") SidebarBlock.Size = UDim2.new(0, 10, 1, 0) SidebarBlock.Position = UDim2.new(1, -10, 0, 0) SidebarBlock.BackgroundColor3 = UI_Sidebar SidebarBlock.BorderSizePixel = 0 SidebarBlock.Parent = Sidebar
 
 local LogoLabel = Instance.new("TextLabel")
 LogoLabel.Size = UDim2.new(1, 0, 0, 45)
@@ -309,15 +322,10 @@ NavigationList.Size = UDim2.new(1, -16, 1, -60)
 NavigationList.Position = UDim2.new(0, 8, 0, 50)
 NavigationList.BackgroundTransparency = 1
 NavigationList.Parent = Sidebar
+local NavLayout = Instance.new("UIListLayout") NavLayout.Padding = UDim.new(0, 5) NavLayout.Parent = NavigationList
 
-local NavLayout = Instance.new("UIListLayout")
-NavLayout.Padding = UDim.new(0, 5)
-NavLayout.SortOrder = Enum.SortOrder.LayoutOrder
-NavLayout.Parent = NavigationList
-
--- RIGHT CONTAINER PANE
+-- Display Area
 local DisplayArea = Instance.new("Frame")
-DisplayArea.Name = "DisplayArea"
 DisplayArea.Size = UDim2.new(1, -160, 1, -15)
 DisplayArea.Position = UDim2.new(0, 155, 0, 10)
 DisplayArea.BackgroundTransparency = 1
@@ -325,11 +333,8 @@ DisplayArea.Parent = MainWindow
 
 local tabsList, framesList, nativeButtons = {"Combat", "Visuals", "Misc", "Skins", "Settings"}, {}, {}
 
--- Tab Creation Factory Loop
 for i, tabName in ipairs(tabsList) do
-    -- Tab Button
     local TabBtn = Instance.new("TextButton")
-    TabBtn.Name = tabName.."Tab"
     TabBtn.Size = UDim2.new(1, 0, 0, 32)
     TabBtn.BackgroundColor3 = (tabName == "Skins") and Color3.fromRGB(32, 32, 40) or Color3.fromRGB(0,0,0)
     TabBtn.BackgroundTransparency = (tabName == "Skins") and 0 or 1
@@ -340,16 +345,10 @@ for i, tabName in ipairs(tabsList) do
     TabBtn.TextXAlignment = Enum.TextXAlignment.Left
     TabBtn.LayoutOrder = i
     TabBtn.Parent = NavigationList
-    
-    local TBtnCorner = Instance.new("UICorner")
-    TBtnCorner.CornerRadius = UDim.new(0, 5)
-    TBtnCorner.Parent = TabBtn
-    
+    local TBtnCorner = Instance.new("UICorner") TBtnCorner.CornerRadius = UDim.new(0, 5) TBtnCorner.Parent = TabBtn
     nativeButtons[tabName] = TabBtn
     
-    -- Dedicated Display Frame
     local TabFrame = Instance.new("ScrollingFrame")
-    TabFrame.Name = tabName.."Frame"
     TabFrame.Size = UDim2.new(1, 0, 1, 0)
     TabFrame.BackgroundTransparency = 1
     TabFrame.BorderSizePixel = 0
@@ -357,166 +356,126 @@ for i, tabName in ipairs(tabsList) do
     TabFrame.ScrollBarThickness = 2
     TabFrame.ScrollBarImageColor3 = UI_Accent
     TabFrame.Parent = DisplayArea
-    
-    local FrameLayout = Instance.new("UIListLayout")
-    FrameLayout.Padding = UDim.new(0, 8)
-    FrameLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    FrameLayout.Parent = TabFrame
-    
+    local FrameLayout = Instance.new("UIListLayout") FrameLayout.Padding = UDim.new(0, 8) FrameLayout.Parent = TabFrame
     framesList[tabName] = TabFrame
     
-    -- Active Controller Function
     TabBtn.MouseButton1Click:Connect(function()
         for tName, tBtn in pairs(nativeButtons) do
-            TweenService:Create(tBtn, TweenInfo.new(0.2), {
-                BackgroundTransparency = 1,
-                TextColor3 = Color3.fromRGB(160, 160, 165)
-            }):Play()
+            TweenService:Create(tBtn, TweenInfo.new(0.2), { BackgroundTransparency = 1, TextColor3 = Color3.fromRGB(160, 160, 165) }):Play()
             framesList[tName].Visible = false
         end
-        TweenService:Create(TabBtn, TweenInfo.new(0.2), {
-            BackgroundTransparency = 0,
-            BackgroundColor3 = Color3.fromRGB(32, 32, 40),
-            TextColor3 = UI_Accent
-        }):Play()
+        TweenService:Create(TabBtn, TweenInfo.new(0.2), { BackgroundTransparency = 0, BackgroundColor3 = Color3.fromRGB(32, 32, 40), TextColor3 = UI_Accent }):Play()
         TabFrame.Visible = true
     end)
 end
 
--- CARD COMPONENT GENERATOR
+-- COMPONENT GENERATORS
 local function CreateSectionCard(parentFrame, titleText)
     local Card = Instance.new("Frame")
     Card.Size = UDim2.new(1, -8, 0, 48)
     Card.BackgroundColor3 = UI_Card
     Card.BorderSizePixel = 0
     Card.Parent = parentFrame
-    
-    local CardCorner = Instance.new("UICorner")
-    CardCorner.CornerRadius = UDim.new(0, 6)
-    CardCorner.Parent = Card
-    
-    local CardStroke = Instance.new("UIStroke")
-    CardStroke.Color = Color3.fromRGB(32, 32, 38)
-    CardStroke.Thickness = 1
-    CardStroke.Parent = Card
-    
-    local Title = Instance.new("TextLabel")
-    Title.Size = UDim2.new(0.6, 0, 1, 0)
-    Title.Position = UDim2.new(0, 12, 0, 0)
-    Title.Text = titleText
-    Title.TextColor3 = Color3.fromRGB(225, 225, 230)
-    Title.Font = Enum.Font.GothamMedium
-    Title.TextSize = 12
-    Title.TextXAlignment = Enum.TextXAlignment.Left
-    Title.BackgroundTransparency = 1
-    Title.Parent = Card
-    
+    local CardCorner = Instance.new("UICorner") CardCorner.CornerRadius = UDim.new(0, 6) CardCorner.Parent = Card
+    local Title = Instance.new("TextLabel") Title.Size = UDim2.new(0.6, 0, 1, 0) Title.Position = UDim2.new(0, 12, 0, 0) Title.Text = titleText Title.TextColor3 = Color3.fromRGB(225, 225, 230) Title.Font = Enum.Font.GothamMedium Title.TextSize = 12 Title.TextXAlignment = Enum.TextXAlignment.Left Title.BackgroundTransparency = 1 Title.Parent = Card
     return Card
 end
 
--- COMPONENT TOGGLE GENERATOR
 local function AttachToggle(cardInstance, defaultState, callback)
-    local ToggleBtn = Instance.new("TextButton")
-    ToggleBtn.Size = UDim2.new(0, 45, 0, 22)
-    ToggleBtn.Position = UDim2.new(1, -57, 0.5, -11)
-    ToggleBtn.BorderSizePixel = 0
-    ToggleBtn.Text = ""
-    ToggleBtn.Parent = cardInstance
-    
-    local ToggleCorner = Instance.new("UICorner")
-    ToggleCorner.CornerRadius = UDim.new(1, 0)
-    ToggleCorner.Parent = ToggleBtn
-    
-    local Indicator = Instance.new("Frame")
-    Indicator.Size = UDim2.new(0, 16, 0, 16)
-    Indicator.BorderSizePixel = 0
-    Indicator.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-    Indicator.Parent = ToggleBtn
-    
-    local IndicatorCorner = Instance.new("UICorner")
-    IndicatorCorner.CornerRadius = UDim.new(1, 0)
-    IndicatorCorner.Parent = Indicator
+    local ToggleBtn = Instance.new("TextButton") ToggleBtn.Size = UDim2.new(0, 45, 0, 22) ToggleBtn.Position = UDim2.new(1, -57, 0.5, -11) ToggleBtn.Text = "" ToggleBtn.Parent = cardInstance
+    local ToggleCorner = Instance.new("UICorner") ToggleCorner.CornerRadius = UDim.new(1, 0) ToggleCorner.Parent = ToggleBtn
+    local Indicator = Instance.new("Frame") Indicator.Size = UDim2.new(0, 16, 0, 16) Indicator.BackgroundColor3 = Color3.fromRGB(255, 255, 255) Indicator.Parent = ToggleBtn
+    local IndicatorCorner = Instance.new("UICorner") IndicatorCorner.CornerRadius = UDim.new(1, 0) IndicatorCorner.Parent = Indicator
     
     local function renderState(state)
-        if state then
-            ToggleBtn.BackgroundColor3 = UI_Accent
-            TweenService:Create(Indicator, TweenInfo.new(0.15), {Position = UDim2.new(1, -19, 0.5, -8)}):Play()
-        else
-            ToggleBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
-            TweenService:Create(Indicator, TweenInfo.new(0.15), {Position = UDim2.new(0, 3, 0.5, -8)}):Play()
-        end
+        if state then ToggleBtn.BackgroundColor3 = UI_Accent TweenService:Create(Indicator, TweenInfo.new(0.15), {Position = UDim2.new(1, -19, 0.5, -8)}):Play()
+        else ToggleBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 60) TweenService:Create(Indicator, TweenInfo.new(0.15), {Position = UDim2.new(0, 3, 0.5, -8)}):Play() end
+    end
+    renderState(defaultState)
+    ToggleBtn.MouseButton1Click:Connect(function() defaultState = not defaultState renderState(defaultState) callback(defaultState) end)
+end
+
+local function AttachButton(cardInstance, buttonText, callback)
+    local Btn = Instance.new("TextButton") Btn.Size = UDim2.new(0, 80, 0, 24) Btn.Position = UDim2.new(1, -92, 0.5, -12) Btn.BackgroundColor3 = Color3.fromRGB(38, 45, 60) Btn.Text = buttonText Btn.TextColor3 = Color3.fromRGB(255, 255, 255) Btn.Font = Enum.Font.GothamBold Btn.TextSize = 10 Btn.Parent = cardInstance
+    local BtnCorner = Instance.new("UICorner") BtnCorner.CornerRadius = UDim.new(0, 4) BtnCorner.Parent = Btn
+    Btn.MouseButton1Click:Connect(callback)
+end
+
+-- ==================== ADVANCED SKYBOX & SUN/MOON CONTROLLER ====================
+local function setSkybox(id, sunId, moonId, clockTime)
+    local sky = Lighting:FindFirstChildOfClass("Sky")
+    if not sky then
+        sky = Instance.new("Sky")
+        sky.Name = "CustomHubSky"
+        sky.Parent = Lighting
     end
     
-    renderState(defaultState)
+    local textureId = "rbxassetid://" .. id
+    sky.SkyboxBk = textureId sky.SkyboxDn = textureId sky.SkyboxFt = textureId
+    sky.SkyboxLf = textureId sky.SkyboxRt = textureId sky.SkyboxUp = textureId
     
-    ToggleBtn.MouseButton1Click:Connect(function()
-        defaultState = not defaultState
-        renderState(defaultState)
-        callback(defaultState)
-    end)
+    -- Override Sun and Moon if provided
+    if sunId then sky.SunTextureId = "rbxassetid://" .. sunId end
+    if moonId then sky.MoonTextureId = "rbxassetid://" .. moonId end
+    
+    -- Force Time of Day to make Sun/Moon visible
+    if clockTime then Lighting.ClockTime = clockTime end
 end
 
 -- ==================== POPULATING TAB PANELS ====================
 
--- Placeholders for Combat, Visuals, Misc (To preserve layout from picture)
 CreateSectionCard(framesList["Combat"], "Aimbot [Placeholder Token]")
-CreateSectionCard(framesList["Visuals"], "Player ESP Boxes [Placeholder Token]")
 CreateSectionCard(framesList["Misc"], "Movement Speed Multiplier [Placeholder]")
 
--- WORKING SKINS TAB ENTRIES
-local card1 = CreateSectionCard(framesList["Skins"], "Skin Changer")
-AttachToggle(card1, Toggles.SkinChanger, function(val) Toggles.SkinChanger = val end)
+-- TIME OF DAY CONTROLS (So you can see the Sun and Moon)
+local timeDayCard = CreateSectionCard(framesList["Visuals"], "🌤️ Force Time: DAY (Show Sun)")
+AttachButton(timeDayCard, "SET DAY", function() Lighting.ClockTime = 14 end)
 
-local card2 = CreateSectionCard(framesList["Skins"], "Charm Changer")
-AttachToggle(card2, Toggles.CharmChanger, function(val) Toggles.CharmChanger = val end)
+local timeNightCard = CreateSectionCard(framesList["Visuals"], "🌙 Force Time: NIGHT (Show Moon)")
+AttachButton(timeNightCard, "SET NIGHT", function() Lighting.ClockTime = 0 end)
 
-local card3 = CreateSectionCard(framesList["Skins"], "Wrap Changer")
-AttachToggle(card3, Toggles.WrapChanger, function(val) Toggles.WrapChanger = val end)
+-- SKYBOXES WITH SUN/MOON SUPPORT
+local sky1 = CreateSectionCard(framesList["Visuals"], "🔴 Blood Moon Night (Custom Moon)")
+AttachButton(sky1, "APPLY", function() setSkybox("217800918", nil, "813965516", 0) end) -- Night sky, scary red moon
 
-local card4 = CreateSectionCard(framesList["Skins"], "Dance Changer")
-AttachToggle(card4, Toggles.DanceChanger, function(val) Toggles.DanceChanger = val end)
+local sky2 = CreateSectionCard(framesList["Visuals"], "⚫ Black Hole Sun (Custom Sun)")
+AttachButton(sky2, "APPLY", function() setSkybox("159454286", "233880816", nil, 14) end) -- Galaxy sky, black hole sun
 
--- SETTINGS TAB ENTRIES
+local sky3 = CreateSectionCard(framesList["Visuals"], "🌇 Vaporwave City")
+AttachButton(sky3, "APPLY", function() setSkybox("1061734346") end)
+
+local sky4 = CreateSectionCard(framesList["Visuals"], "⚔️ Anime Sky")
+AttachButton(sky4, "APPLY", function() setSkybox("1045964490") end)
+
+local sky5 = CreateSectionCard(framesList["Visuals"], "🌌 Deep Purple Nebula")
+AttachButton(sky5, "APPLY", function() setSkybox("159454299", nil, nil, 0) end)
+
+local skyReset = CreateSectionCard(framesList["Visuals"], "❌ Reset Lighting")
+AttachButton(skyReset, "RESET", function()
+    local sky = Lighting:FindFirstChild("CustomHubSky")
+    if sky then sky:Destroy() end
+end)
+
+-- SKINS TAB
+local card1 = CreateSectionCard(framesList["Skins"], "Skin Changer") AttachToggle(card1, Toggles.SkinChanger, function(val) Toggles.SkinChanger = val end)
+local card2 = CreateSectionCard(framesList["Skins"], "Charm Changer") AttachToggle(card2, Toggles.CharmChanger, function(val) Toggles.CharmChanger = val end)
+local card3 = CreateSectionCard(framesList["Skins"], "Wrap Changer") AttachToggle(card3, Toggles.WrapChanger, function(val) Toggles.WrapChanger = val end)
+local card4 = CreateSectionCard(framesList["Skins"], "Dance & Emote Changer") AttachToggle(card4, Toggles.DanceChanger, function(val) Toggles.DanceChanger = val end)
+
+-- SETTINGS TAB
 local configCard = CreateSectionCard(framesList["Settings"], "Save Settings State Profile")
-local SaveBtn = Instance.new("TextButton")
-SaveBtn.Size = UDim2.new(0, 80, 0, 24)
-SaveBtn.Position = UDim2.new(1, -92, 0.5, -12)
-SaveBtn.BackgroundColor3 = Color3.fromRGB(38, 45, 60)
-SaveBtn.Font = Enum.Font.GothamBold
-SaveBtn.Text = "SAVE"
-SaveBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-SaveBtn.TextSize = 10
-SaveBtn.Parent = configCard
-local SBCorner = Instance.new("UICorner") SBCorner.CornerRadius = UDim.new(0,4) SBCorner.Parent = SaveBtn
-
-SaveBtn.MouseButton1Click:Connect(function()
+AttachButton(configCard, "SAVE", function()
     saveConfig()
-    SaveBtn.Text = "SAVED!"
-    task.wait(1)
-    SaveBtn.Text = "SAVE"
+    local btn = configCard:FindFirstChildOfClass("TextButton")
+    if btn then btn.Text = "SAVED!" task.wait(1) btn.Text = "SAVE" end
 end)
 
 local unloadCard = CreateSectionCard(framesList["Settings"], "Unload & Close Menu GUI")
-local UnloadBtn = Instance.new("TextButton")
-UnloadBtn.Size = UDim2.new(0, 80, 0, 24)
-UnloadBtn.Position = UDim2.new(1, -92, 0.5, -12)
-UnloadBtn.BackgroundColor3 = Color3.fromRGB(90, 35, 35)
-UnloadBtn.Font = Enum.Font.GothamBold
-UnloadBtn.Text = "UNLOAD"
-UnloadBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-UnloadBtn.TextSize = 10
-UnloadBtn.Parent = unloadCard
-local UBCorner = Instance.new("UICorner") UBCorner.CornerRadius = UDim.new(0,4) UBCorner.Parent = UnloadBtn
+AttachButton(unloadCard, "UNLOAD", function() HubGui:Destroy() end)
+unloadCard:FindFirstChildOfClass("TextButton").BackgroundColor3 = Color3.fromRGB(90, 35, 35)
 
-UnloadBtn.MouseButton1Click:Connect(function()
-    HubGui:Destroy()
-end)
-
--- Window Toggle Key Bind Listener (Default: RightShift)
 UserInputService.InputBegan:Connect(function(input, processed)
-    if not processed and input.KeyCode == Toggles.ToggleKey then
-        MainWindow.Visible = not MainWindow.Visible
-    end
+    if not processed and input.KeyCode == Toggles.ToggleKey then MainWindow.Visible = not MainWindow.Visible end
 end)
 
 print("Premium Custom Layout Dashboard Loaded Successfully.")
