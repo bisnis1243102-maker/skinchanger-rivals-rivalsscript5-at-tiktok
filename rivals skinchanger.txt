@@ -1,196 +1,522 @@
--- [[ XEON HUB V2 - UNIVERSAL ALL-COSMETIC UNLOCKER EDITION ]] --
+-- [[ CUSTOM MODERN SCRIPT HUB ENGINE ]] --
 local Players = game:GetService("Players")
-local lp = Players.LocalPlayer
-local pgui = lp:WaitForChild("PlayerGui")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local HttpService = game:GetService("HttpService")
+local CoreGui = game:GetService("CoreGui")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
 
--- 1. CLEANUP PREVIOUS VERSIONS
-if pgui:FindFirstChild("XeonHub_V2") then pgui.XeonHub_V2:Destroy() end
+local player = Players.LocalPlayer
+local playerScripts = player.PlayerScripts
+local controllers = playerScripts:WaitForChild("Controllers", 10)
 
--- 2. MAIN GUI SETUP
-local sg = Instance.new("ScreenGui", pgui)
-sg.Name = "XeonHub_V2"
-sg.ResetOnSpawn = false
+-- Game Modules
+local EnumLibrary = require(ReplicatedStorage.Modules:WaitForChild("EnumLibrary", 10))
+if EnumLibrary then EnumLibrary:WaitForEnumBuilder() end
 
-local main = Instance.new("Frame", sg)
-main.Size = UDim2.new(0, 580, 0, 380)
-main.Position = UDim2.new(0.5, -290, 0.5, -190)
-main.BackgroundColor3 = Color3.fromRGB(13, 15, 22)
-main.BorderSizePixel = 0
-main.Active = true
-main.Draggable = true
-Instance.new("UICorner", main).CornerRadius = UDim.new(0, 8)
+local CosmeticLibrary = require(ReplicatedStorage.Modules:WaitForChild("CosmeticLibrary", 10))
+local ItemLibrary = require(ReplicatedStorage.Modules:WaitForChild("ItemLibrary", 10))
+local DataController = require(controllers:WaitForChild("PlayerDataController", 10))
 
-local mainStroke = Instance.new("UIStroke", main)
-mainStroke.Color = Color3.fromRGB(0, 220, 255)
-mainStroke.Thickness = 2
+-- Global System States (Controlled via GUI Toggles)
+local Toggles = {
+    SkinChanger = true,
+    CharmChanger = true,
+    WrapChanger = true,
+    DanceChanger = true,
+    ToggleKey = Enum.KeyCode.RightShift
+}
 
-local topbar = Instance.new("Frame", main)
-topbar.Size = UDim2.new(1, 0, 0, 40)
-topbar.BackgroundTransparency = 1
+local equipped, favorites = {}, {}
+local constructingWeapon, viewingProfile = nil, nil
+local lastUsedWeapon = nil
+local saveFile = "unlockall/custom_config.json"
 
-local title = Instance.new("TextLabel", topbar)
-title.Size = UDim2.new(1, -20, 1, 0)
-title.Position = UDim2.new(0, 20, 0, 0)
-title.Text = "LUAOR HUB V2.0  //  UNIVERSAL EDITION"
-title.TextColor3 = Color3.fromRGB(0, 255, 255)
-title.Font = Enum.Font.GothamBlack
-title.TextSize = 16
-title.TextXAlignment = Enum.TextXAlignment.Left
-title.BackgroundTransparency = 1
+-- ==================== BACKEND OPTIMIZED UNLOCK ENGINE ====================
 
-local divider = Instance.new("Frame", main)
-divider.Size = UDim2.new(1, 0, 0, 2)
-divider.Position = UDim2.new(0, 0, 0, 40)
-divider.BackgroundColor3 = Color3.fromRGB(0, 150, 200)
-divider.BorderSizePixel = 0
-
-local side = Instance.new("Frame", main)
-side.Size = UDim2.new(0, 140, 1, -42)
-side.Position = UDim2.new(0, 0, 0, 42)
-side.BackgroundColor3 = Color3.fromRGB(18, 22, 30)
-Instance.new("UICorner", side).CornerRadius = UDim.new(0, 8)
-
-local container = Instance.new("Frame", main)
-container.Size = UDim2.new(1, -150, 1, -50)
-container.Position = UDim2.new(0, 150, 0, 50)
-container.BackgroundTransparency = 1
-
-local tabs = {}
-local tabButtons = {}
-
-local function createTab(name, pos, isFirst)
-    local btn = Instance.new("TextButton", side)
-    btn.Size = UDim2.new(1, -10, 0, 40)
-    btn.Position = UDim2.new(0, 5, 0, pos)
-    btn.BackgroundColor3 = isFirst and Color3.fromRGB(35, 40, 55) or Color3.fromRGB(22, 26, 35)
-    btn.Text = "  " .. name
-    btn.TextColor3 = isFirst and Color3.fromRGB(0, 255, 255) or Color3.fromRGB(180, 180, 180)
-    btn.Font = Enum.Font.GothamBold
-    btn.TextSize = 14
-    btn.TextXAlignment = Enum.TextXAlignment.Left
-    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
-
-    local frame = Instance.new("ScrollingFrame", container)
-    frame.Size = UDim2.new(1, 0, 1, 0)
-    frame.BackgroundTransparency = 1
-    frame.Visible = isFirst
-    frame.ScrollBarThickness = 4
-    frame.CanvasSize = UDim2.new(0, 0, 0, 0)
-    frame.BorderSizePixel = 0
-
-    local layout = Instance.new("UIListLayout", frame)
-    layout.Padding = UDim.new(0, 10)
-    layout.SortOrder = Enum.SortOrder.LayoutOrder
-
-    tabs[name] = frame
-    tabButtons[name] = btn
-
-    btn.MouseButton1Click:Connect(function()
-        for tName, tFrame in pairs(tabs) do
-            tFrame.Visible = (tName == name)
-            tabButtons[tName].TextColor3 = (tName == name) and Color3.fromRGB(0, 255, 255) or Color3.fromRGB(180, 180, 180)
-            tabButtons[tName].BackgroundColor3 = (tName == name) and Color3.fromRGB(35, 40, 55) or Color3.fromRGB(22, 26, 35)
-        end
-    end)
-
-    return frame
-end
-
-local function createButton(parentTab, text, bgColor, textColor, callback)
-    local btn = Instance.new("TextButton", parentTab)
-    btn.Size = UDim2.new(1, -10, 0, 50)
-    btn.BackgroundColor3 = bgColor
-    btn.Text = text
-    btn.TextColor3 = textColor or Color3.new(1, 1, 1)
-    btn.Font = Enum.Font.GothamBold
-    btn.TextSize = 15
-    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 8)
+local function cloneCosmetic(name, cosmeticType, options)
+    local base = CosmeticLibrary.Cosmetics[name]
+    if not base then return nil end
+    local data = {}
+    for key, value in pairs(base) do data[key] = value end
+    data.Name = name
+    data.Type = data.Type or cosmeticType
+    data.Seed = data.Seed or math.random(1, 1000000)
     
-    btn.MouseButton1Click:Connect(callback)
-    parentTab.CanvasSize = UDim2.new(0, 0, 0, #parentTab:GetChildren() * 60)
-    return btn
+    if EnumLibrary then
+        local success, enumId = pcall(EnumLibrary.ToEnum, EnumLibrary, name)
+        if success and enumId then data.Enum, data.ObjectID = enumId, data.ObjectID or enumId end
+    end
+    if options then
+        if options.inverted ~= nil then data.Inverted = options.inverted end
+        if options.favoritesOnly ~= nil then data.OnlyUseFavorites = options.favoritesOnly end
+    end
+    return data
 end
 
--- Tab Layout
-local tabMain = createTab("🚀 MAIN", 10, true)
-local tabPlayer = createTab("🏃‍♂️ PLAYER", 60, false)
-local tabVis = createTab("👁️ VISUALS", 110, false)
-local tabMisc = createTab("⚙️ MISC", 160, false)
-local tabSettings = createTab("🛠️ SETTINGS", 210, false) -- Added new tab
-
--- Graphics Quality Changer (Resolution Alternative)
-createButton(tabSettings, "Graphics: LOW (FPS Boost)", Color3.fromRGB(30, 35, 45), Color3.fromRGB(255, 255, 255), function()
-    UserSettings().GameSettings.SavedQualityLevel = Enum.QualityLevel.Level01
-end)
-createButton(tabSettings, "Graphics: HIGH", Color3.fromRGB(30, 35, 45), Color3.fromRGB(255, 255, 255), function()
-    UserSettings().GameSettings.SavedQualityLevel = Enum.QualityLevel.Level10
-end)
-
--- Existing Placeholder Options
-createButton(tabPlayer, "Speed Modification (Toggle)", Color3.fromRGB(30, 35, 45), Color3.fromRGB(200, 200, 200), function() print("Speed altered") end)
-createButton(tabVis, "Rendering Options / ESP", Color3.fromRGB(30, 35, 45), Color3.fromRGB(200, 200, 200), function() print("ESP rendered") end)
-createButton(tabMisc, "Server Transition", Color3.fromRGB(30, 35, 45), Color3.fromRGB(200, 200, 200), function() print("Server Hop initialized") end)
-
--- OMNI-COSMETIC INJECTION SEQUENCE
-local sequenceExecuted = false
-
-createButton(tabMain, "🔥 INITIATE OMNI SEQUENCE", Color3.fromRGB(220, 20, 60), Color3.new(1,1,1), function()
-    local btn = tabMain:FindFirstChildOfClass("TextButton")
-    if sequenceExecuted then return end
-
-    btn.Text = "⌛ INJECTING..."
-    btn.BackgroundColor3 = Color3.fromRGB(150, 100, 0)
-
-    task.spawn(function()
-        local success, result = pcall(function()
-            local ReplicatedStorage = game:GetService("ReplicatedStorage")
-            local controllers = lp.PlayerScripts:WaitForChild("Controllers", 10)
-            
-            local EnumLibrary = require(ReplicatedStorage.Modules:WaitForChild("EnumLibrary", 10))
-            if EnumLibrary then EnumLibrary:WaitForEnumBuilder() end
-            local CosmeticLibrary = require(ReplicatedStorage.Modules:WaitForChild("CosmeticLibrary", 10))
-            local DataController = require(controllers:WaitForChild("PlayerDataController", 10))
-            
-            local equipped = {}
-            
-            CosmeticLibrary.OwnsCosmetic = function(self, inventory, name, weapon)
-                return true
-            end
-
-            local originalGet = DataController.Get
-            DataController.Get = function(self, key)
-                local data = originalGet(self, key)
-                if key == "CosmeticInventory" then
-                    local proxy = setmetatable({}, {__index = function() return true end})
-                    return proxy
-                end
-                return data
-            end
-
-            if hookmetamethod then
-                local equipRemote = ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild("Data") and ReplicatedStorage.Remotes.Data:FindFirstChild("EquipCosmetic")
-                if equipRemote then
-                    local oldNamecall
-                    oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-                        local method = getnamecallmethod()
-                        if method == "FireServer" and self == equipRemote then
-                            local args = {...}
-                            equipped[args[1] or "Global"] = equipped[args[1] or "Global"] or {}
-                            equipped[args[1] or "Global"][args[2]] = args[3]
-                        end
-                        return oldNamecall(self, ...)
-                    end)
+local function saveConfig()
+    if not writefile then return end
+    pcall(function()
+        local config = {equipped = {}, favorites = favorites}
+        for weapon, cosmetics in pairs(equipped) do
+            config.equipped[weapon] = {}
+            for cosmeticType, cosmeticData in pairs(cosmetics) do
+                if cosmeticData and cosmeticData.Name then
+                    config.equipped[weapon][cosmeticType] = {
+                        name = cosmeticData.Name, seed = cosmeticData.Seed, inverted = cosmeticData.Inverted
+                    }
                 end
             end
-        end)
-
-        if success then
-            sequenceExecuted = true
-            btn.Text = "✅ OMNI NETWORK ACTIVE"
-            btn.BackgroundColor3 = Color3.fromRGB(0, 180, 80)
-        else
-            btn.Text = "❌ HOOK ERROR (FAILED)"
-            warn("Xeon Hub Error: " .. tostring(result))
         end
+        makefolder("unlockall")
+        writefile(saveFile, HttpService:JSONEncode(config))
     end)
+end
+
+local function loadConfig()
+    if not readfile or not isfile or not isfile(saveFile) then return end
+    pcall(function()
+        local config = HttpService:JSONDecode(readfile(saveFile))
+        if config.equipped then
+            for weapon, cosmetics in pairs(config.equipped) do
+                equipped[weapon] = {}
+                for cosmeticType, cosmeticData in pairs(cosmetics) do
+                    local cloned = cloneCosmetic(cosmeticData.name, cosmeticType, {inverted = cosmeticData.inverted})
+                    if cloned then cloned.Seed = cosmeticData.seed equipped[weapon][cosmeticType] = cloned end
+                end
+            end
+        end
+        favorites = config.favorites or {}
+    end)
+end
+
+local function isAllowedCosmetic(name, cosmeticType)
+    if name:find("MISSING_") then return false end
+    
+    if cosmeticType == "Skin" and Toggles.SkinChanger then return true end
+    if (cosmeticType == "Charm" or name:lower():find("charm")) and Toggles.CharmChanger then return true end
+    if (cosmeticType == "Wrap" or cosmeticType == "Wrapping" or name:lower():find("wrap")) and Toggles.WrapChanger then return true end
+    if (cosmeticType == "Dance" or cosmeticType == "Emote" or name:lower():find("dance") or name:lower():find("emote")) and Toggles.DanceChanger then return true end
+    
+    return false
+end
+
+-- Hook Engine Injectors
+local originalOwnsCosmetic = CosmeticLibrary.OwnsCosmetic
+CosmeticLibrary.OwnsCosmetic = function(self, inventory, name, weapon)
+    if name:find("MISSING_") then return originalOwnsCosmetic(self, inventory, name, weapon) end
+    local cosmetic = CosmeticLibrary.Cosmetics[name]
+    if cosmetic and isAllowedCosmetic(name, cosmetic.Type) then return true end
+    return originalOwnsCosmetic(self, inventory, name, weapon)
+end
+
+local originalGet = DataController.Get
+DataController.Get = function(self, key)
+    local data = originalGet(self, key)
+    if key == "CosmeticInventory" then
+        local proxy = {}
+        if data then for k, v in pairs(data) do 
+            local cosmetic = CosmeticLibrary.Cosmetics[k]
+            if cosmetic and isAllowedCosmetic(k, cosmetic.Type) then proxy[k] = v end
+        end end
+        return setmetatable(proxy, {__index = function(t, k)
+            local cosmetic = CosmeticLibrary.Cosmetics[k]
+            if cosmetic and isAllowedCosmetic(k, cosmetic.Type) then return true end
+            return nil
+        end})
+    end
+    if key == "FavoritedCosmetics" then
+        local result = data and table.clone(data) or {}
+        for weapon, favs in pairs(favorites) do
+            result[weapon] = result[weapon] or {}
+            for name, isFav in pairs(favs) do 
+                local cosmetic = CosmeticLibrary.Cosmetics[name]
+                if cosmetic and isAllowedCosmetic(name, cosmetic.Type) then result[weapon][name] = isFav end
+            end
+        end
+        return result
+    end
+    return data
+end
+
+local originalGetWeaponData = DataController.GetWeaponData
+DataController.GetWeaponData = function(self, weaponName)
+    local data = originalGetWeaponData(self, weaponName)
+    if not data then return data end
+    local merged = {}
+    for key, value in pairs(data) do merged[key] = value end
+    merged.Name = weaponName
+    if equipped[weaponName] then
+        for cosmeticType, cosmeticData in pairs(equipped[weaponName]) do 
+            if cosmeticType == "Skin" or cosmeticType == "Charm" or cosmeticType == "Wrap" or cosmeticType == "Wrapping" then 
+                merged[cosmeticType] = cosmeticData 
+            end
+        end
+    end
+    return merged
+end
+
+-- Client Interaction Layer
+local ClientItem
+pcall(function() ClientItem = require(player.PlayerScripts.Modules.ClientReplicatedClasses.ClientFighter.ClientItem) end)
+if ClientItem and ClientItem._CreateViewModel then
+    local originalCreateViewModel = ClientItem._CreateViewModel
+    ClientItem._CreateViewModel = function(self, viewmodelRef)
+        local weaponName = self.Name
+        local weaponPlayer = self.ClientFighter and self.ClientFighter.Player
+        constructingWeapon = (weaponPlayer == player) and weaponName or nil
+        if weaponPlayer == player and equipped[weaponName] and viewmodelRef then
+            if equipped[weaponName].Skin and Toggles.SkinChanger then
+                local dataKey, skinKey, nameKey = self:ToEnum("Data"), self:ToEnum("Skin"), self:ToEnum("Name")
+                if viewmodelRef[dataKey] then viewmodelRef[dataKey][skinKey] = equipped[weaponName].Skin viewmodelRef[dataKey][nameKey] = equipped[weaponName].Skin.Name
+                elseif viewmodelRef.Data then viewmodelRef.Data.Skin = equipped[weaponName].Skin viewmodelRef.Data.Name = equipped[weaponName].Skin.Name end
+            end
+        end
+        local result = originalCreateViewModel(self, viewmodelRef)
+        constructingWeapon = nil
+        return result
+    end
+end
+
+-- Metamethod Packets Interceptor
+if hookmetamethod then
+    local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+    local dataRemotes = remotes and remotes:FindFirstChild("Data")
+    local equipRemote = dataRemotes and dataRemotes:FindFirstChild("EquipCosmetic")
+    local favoriteRemote = dataRemotes and dataRemotes:FindFirstChild("FavoriteCosmetic")
+    
+    local oldNamecall
+    oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+        if getnamecallmethod() ~= "FireServer" then return oldNamecall(self, ...) end
+        local args = {...}
+        
+        if self == equipRemote then
+            local weaponName, cosmeticType, cosmeticName, options = args[1], args[2], args[3], args[4] or {}
+            local isDanceRemote = (cosmeticType == "Dance" or cosmeticType == "Emote" or (cosmeticName and (cosmeticName:lower():find("dance") or cosmeticName:lower():find("emote"))))
+            
+            if isDanceRemote then
+                equipped.Dances = equipped.Dances or {}
+                if not cosmeticName or cosmeticName == "None" or cosmeticName == "" then equipped.Dances[cosmeticType] = nil
+                else
+                    local cloned = cloneCosmetic(cosmeticName, cosmeticType, {inverted = options.IsInverted, favoritesOnly = options.OnlyUseFavorites})
+                    if cloned then equipped.Dances[cosmeticType] = cloned end
+                end
+                task.defer(function() pcall(function() DataController.CurrentData:Replicate("CosmeticInventory") end) task.wait(0.2) saveConfig() end)
+                return
+            else
+                equipped[weaponName] = equipped[weaponName] or {}
+                if not cosmeticName or cosmeticName == "None" or cosmeticName == "" then
+                    equipped[weaponName][cosmeticType] = nil
+                    if not next(equipped[weaponName]) then equipped[weaponName] = nil end
+                else
+                    local cloned = cloneCosmetic(cosmeticName, cosmeticType, {inverted = options.IsInverted, favoritesOnly = options.OnlyUseFavorites})
+                    if cloned then equipped[weaponName][cosmeticType] = cloned end
+                end
+                task.defer(function() pcall(function() DataController.CurrentData:Replicate("WeaponInventory") end) task.wait(0.2) saveConfig() end)
+                return
+            end
+        end
+        return oldNamecall(self, ...)
+    end)
+end
+
+loadConfig()
+
+-- ==================== ADVANCED UI CREATION SYSTEM ====================
+
+local UI_Accent = Color3.fromRGB(0, 168, 255)       -- Sleek Neon Light Blue Accent
+local UI_Background = Color3.fromRGB(16, 16, 20)    -- Deep Dark Slate
+local UI_Sidebar = Color3.fromRGB(22, 22, 28)       -- Secondary Gray for Sidebar
+local UI_Card = Color3.fromRGB(26, 26, 32)          -- Component Card Gray
+
+local HubGui = Instance.new("ScreenGui")
+HubGui.Name = "PremiumScriptHub"
+HubGui.ResetOnSpawn = false
+HubGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+local success, coreTarget = pcall(function() return CoreGui end)
+HubGui.Parent = success and coreTarget or player:WaitForChild("PlayerGui")
+
+-- Main Window Window
+local MainWindow = Instance.new("Frame")
+MainWindow.Name = "MainWindow"
+MainWindow.Size = UDim2.new(0, 560, 0, 360)
+MainWindow.Position = UDim2.new(0.5, -280, 0.5, -180)
+MainWindow.BackgroundColor3 = UI_Background
+MainWindow.BorderSizePixel = 0
+MainWindow.Active = true
+MainWindow.Parent = HubGui
+
+local MainCorner = Instance.new("UICorner")
+MainCorner.CornerRadius = UDim.new(0, 10)
+MainCorner.Parent = MainWindow
+
+local MainStroke = Instance.new("UIStroke")
+MainStroke.Color = Color3.fromRGB(38, 38, 45)
+MainStroke.Thickness = 1
+MainStroke.Parent = MainWindow
+
+-- Custom Drag Drop Handling
+local dragging, dragInput, dragStart, startPos
+MainWindow.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true dragStart = input.Position startPos = MainWindow.Position
+        input.Changed:Connect(function() if input.UserInputState == Enum.UserInputState.End then dragging = false end end)
+    end
 end)
+MainWindow.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement then dragInput = input end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        local delta = input.Position - dragStart
+        MainWindow.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+-- LEFT SIDE NAVIGATION BAR
+local Sidebar = Instance.new("Frame")
+Sidebar.Name = "Sidebar"
+Sidebar.Size = UDim2.new(0, 150, 1, 0)
+Sidebar.BackgroundColor3 = UI_Sidebar
+Sidebar.BorderSizePixel = 0
+Sidebar.Parent = MainWindow
+
+local SidebarCorner = Instance.new("UICorner")
+SidebarCorner.CornerRadius = UDim.new(0, 10)
+SidebarCorner.Parent = Sidebar
+
+-- Clean hide-overflow edge block
+local SidebarBlock = Instance.new("Frame")
+SidebarBlock.Size = UDim2.new(0, 10, 1, 0)
+SidebarBlock.Position = UDim2.new(1, -10, 0, 0)
+SidebarBlock.BackgroundColor3 = UI_Sidebar
+SidebarBlock.BorderSizePixel = 0
+SidebarBlock.Parent = Sidebar
+
+local LogoLabel = Instance.new("TextLabel")
+LogoLabel.Size = UDim2.new(1, 0, 0, 45)
+LogoLabel.Position = UDim2.new(0, 0, 0, 5)
+LogoLabel.Text = "RIVALS HUB"
+LogoLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+LogoLabel.Font = Enum.Font.GothamBold
+LogoLabel.TextSize = 16
+LogoLabel.BackgroundTransparency = 1
+LogoLabel.Parent = Sidebar
+
+local NavigationList = Instance.new("Frame")
+NavigationList.Size = UDim2.new(1, -16, 1, -60)
+NavigationList.Position = UDim2.new(0, 8, 0, 50)
+NavigationList.BackgroundTransparency = 1
+NavigationList.Parent = Sidebar
+
+local NavLayout = Instance.new("UIListLayout")
+NavLayout.Padding = UDim.new(0, 5)
+NavLayout.SortOrder = Enum.SortOrder.LayoutOrder
+NavLayout.Parent = NavigationList
+
+-- RIGHT CONTAINER PANE
+local DisplayArea = Instance.new("Frame")
+DisplayArea.Name = "DisplayArea"
+DisplayArea.Size = UDim2.new(1, -160, 1, -15)
+DisplayArea.Position = UDim2.new(0, 155, 0, 10)
+DisplayArea.BackgroundTransparency = 1
+DisplayArea.Parent = MainWindow
+
+local tabsList, framesList, nativeButtons = {"Combat", "Visuals", "Misc", "Skins", "Settings"}, {}, {}
+
+-- Tab Creation Factory Loop
+for i, tabName in ipairs(tabsList) do
+    -- Tab Button
+    local TabBtn = Instance.new("TextButton")
+    TabBtn.Name = tabName.."Tab"
+    TabBtn.Size = UDim2.new(1, 0, 0, 32)
+    TabBtn.BackgroundColor3 = (tabName == "Skins") and Color3.fromRGB(32, 32, 40) or Color3.fromRGB(0,0,0)
+    TabBtn.BackgroundTransparency = (tabName == "Skins") and 0 or 1
+    TabBtn.Text = "   " .. tabName
+    TabBtn.TextColor3 = (tabName == "Skins") and UI_Accent or Color3.fromRGB(160, 160, 165)
+    TabBtn.Font = Enum.Font.GothamMedium
+    TabBtn.TextSize = 12
+    TabBtn.TextXAlignment = Enum.TextXAlignment.Left
+    TabBtn.LayoutOrder = i
+    TabBtn.Parent = NavigationList
+    
+    local TBtnCorner = Instance.new("UICorner")
+    TBtnCorner.CornerRadius = UDim.new(0, 5)
+    TBtnCorner.Parent = TabBtn
+    
+    nativeButtons[tabName] = TabBtn
+    
+    -- Dedicated Display Frame
+    local TabFrame = Instance.new("ScrollingFrame")
+    TabFrame.Name = tabName.."Frame"
+    TabFrame.Size = UDim2.new(1, 0, 1, 0)
+    TabFrame.BackgroundTransparency = 1
+    TabFrame.BorderSizePixel = 0
+    TabFrame.Visible = (tabName == "Skins")
+    TabFrame.ScrollBarThickness = 2
+    TabFrame.ScrollBarImageColor3 = UI_Accent
+    TabFrame.Parent = DisplayArea
+    
+    local FrameLayout = Instance.new("UIListLayout")
+    FrameLayout.Padding = UDim.new(0, 8)
+    FrameLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    FrameLayout.Parent = TabFrame
+    
+    framesList[tabName] = TabFrame
+    
+    -- Active Controller Function
+    TabBtn.MouseButton1Click:Connect(function()
+        for tName, tBtn in pairs(nativeButtons) do
+            TweenService:Create(tBtn, TweenInfo.new(0.2), {
+                BackgroundTransparency = 1,
+                TextColor3 = Color3.fromRGB(160, 160, 165)
+            }):Play()
+            framesList[tName].Visible = false
+        end
+        TweenService:Create(TabBtn, TweenInfo.new(0.2), {
+            BackgroundTransparency = 0,
+            BackgroundColor3 = Color3.fromRGB(32, 32, 40),
+            TextColor3 = UI_Accent
+        }):Play()
+        TabFrame.Visible = true
+    end)
+end
+
+-- CARD COMPONENT GENERATOR
+local function CreateSectionCard(parentFrame, titleText)
+    local Card = Instance.new("Frame")
+    Card.Size = UDim2.new(1, -8, 0, 48)
+    Card.BackgroundColor3 = UI_Card
+    Card.BorderSizePixel = 0
+    Card.Parent = parentFrame
+    
+    local CardCorner = Instance.new("UICorner")
+    CardCorner.CornerRadius = UDim.new(0, 6)
+    CardCorner.Parent = Card
+    
+    local CardStroke = Instance.new("UIStroke")
+    CardStroke.Color = Color3.fromRGB(32, 32, 38)
+    CardStroke.Thickness = 1
+    CardStroke.Parent = Card
+    
+    local Title = Instance.new("TextLabel")
+    Title.Size = UDim2.new(0.6, 0, 1, 0)
+    Title.Position = UDim2.new(0, 12, 0, 0)
+    Title.Text = titleText
+    Title.TextColor3 = Color3.fromRGB(225, 225, 230)
+    Title.Font = Enum.Font.GothamMedium
+    Title.TextSize = 12
+    Title.TextXAlignment = Enum.TextXAlignment.Left
+    Title.BackgroundTransparency = 1
+    Title.Parent = Card
+    
+    return Card
+end
+
+-- COMPONENT TOGGLE GENERATOR
+local function AttachToggle(cardInstance, defaultState, callback)
+    local ToggleBtn = Instance.new("TextButton")
+    ToggleBtn.Size = UDim2.new(0, 45, 0, 22)
+    ToggleBtn.Position = UDim2.new(1, -57, 0.5, -11)
+    ToggleBtn.BorderSizePixel = 0
+    ToggleBtn.Text = ""
+    ToggleBtn.Parent = cardInstance
+    
+    local ToggleCorner = Instance.new("UICorner")
+    ToggleCorner.CornerRadius = UDim.new(1, 0)
+    ToggleCorner.Parent = ToggleBtn
+    
+    local Indicator = Instance.new("Frame")
+    Indicator.Size = UDim2.new(0, 16, 0, 16)
+    Indicator.BorderSizePixel = 0
+    Indicator.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    Indicator.Parent = ToggleBtn
+    
+    local IndicatorCorner = Instance.new("UICorner")
+    IndicatorCorner.CornerRadius = UDim.new(1, 0)
+    IndicatorCorner.Parent = Indicator
+    
+    local function renderState(state)
+        if state then
+            ToggleBtn.BackgroundColor3 = UI_Accent
+            TweenService:Create(Indicator, TweenInfo.new(0.15), {Position = UDim2.new(1, -19, 0.5, -8)}):Play()
+        else
+            ToggleBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+            TweenService:Create(Indicator, TweenInfo.new(0.15), {Position = UDim2.new(0, 3, 0.5, -8)}):Play()
+        end
+    end
+    
+    renderState(defaultState)
+    
+    ToggleBtn.MouseButton1Click:Connect(function()
+        defaultState = not defaultState
+        renderState(defaultState)
+        callback(defaultState)
+    end)
+end
+
+-- ==================== POPULATING TAB PANELS ====================
+
+-- Placeholders for Combat, Visuals, Misc (To preserve layout from picture)
+CreateSectionCard(framesList["Combat"], "Aimbot [Placeholder Token]")
+CreateSectionCard(framesList["Visuals"], "Player ESP Boxes [Placeholder Token]")
+CreateSectionCard(framesList["Misc"], "Movement Speed Multiplier [Placeholder]")
+
+-- WORKING SKINS TAB ENTRIES
+local card1 = CreateSectionCard(framesList["Skins"], "Skin Changer")
+AttachToggle(card1, Toggles.SkinChanger, function(val) Toggles.SkinChanger = val end)
+
+local card2 = CreateSectionCard(framesList["Skins"], "Charm Changer")
+AttachToggle(card2, Toggles.CharmChanger, function(val) Toggles.CharmChanger = val end)
+
+local card3 = CreateSectionCard(framesList["Skins"], "Wrap Changer")
+AttachToggle(card3, Toggles.WrapChanger, function(val) Toggles.WrapChanger = val end)
+
+local card4 = CreateSectionCard(framesList["Skins"], "Dance Changer")
+AttachToggle(card4, Toggles.DanceChanger, function(val) Toggles.DanceChanger = val end)
+
+-- SETTINGS TAB ENTRIES
+local configCard = CreateSectionCard(framesList["Settings"], "Save Settings State Profile")
+local SaveBtn = Instance.new("TextButton")
+SaveBtn.Size = UDim2.new(0, 80, 0, 24)
+SaveBtn.Position = UDim2.new(1, -92, 0.5, -12)
+SaveBtn.BackgroundColor3 = Color3.fromRGB(38, 45, 60)
+SaveBtn.Font = Enum.Font.GothamBold
+SaveBtn.Text = "SAVE"
+SaveBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+SaveBtn.TextSize = 10
+SaveBtn.Parent = configCard
+local SBCorner = Instance.new("UICorner") SBCorner.CornerRadius = UDim.new(0,4) SBCorner.Parent = SaveBtn
+
+SaveBtn.MouseButton1Click:Connect(function()
+    saveConfig()
+    SaveBtn.Text = "SAVED!"
+    task.wait(1)
+    SaveBtn.Text = "SAVE"
+end)
+
+local unloadCard = CreateSectionCard(framesList["Settings"], "Unload & Close Menu GUI")
+local UnloadBtn = Instance.new("TextButton")
+UnloadBtn.Size = UDim2.new(0, 80, 0, 24)
+UnloadBtn.Position = UDim2.new(1, -92, 0.5, -12)
+UnloadBtn.BackgroundColor3 = Color3.fromRGB(90, 35, 35)
+UnloadBtn.Font = Enum.Font.GothamBold
+UnloadBtn.Text = "UNLOAD"
+UnloadBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+UnloadBtn.TextSize = 10
+UnloadBtn.Parent = unloadCard
+local UBCorner = Instance.new("UICorner") UBCorner.CornerRadius = UDim.new(0,4) UBCorner.Parent = UnloadBtn
+
+UnloadBtn.MouseButton1Click:Connect(function()
+    HubGui:Destroy()
+end)
+
+-- Window Toggle Key Bind Listener (Default: RightShift)
+UserInputService.InputBegan:Connect(function(input, processed)
+    if not processed and input.KeyCode == Toggles.ToggleKey then
+        MainWindow.Visible = not MainWindow.Visible
+    end
+end)
+
+print("Premium Custom Layout Dashboard Loaded Successfully.")
